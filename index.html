@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google-site-verification" content="google489a46a374fc7eeb" />
+    <title>مواقيت الصلاة | Prayer Times</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Tajawal -->
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Tajawal', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        
+        /* Smooth transitions */
+        .prayer-card {
+            transition: all 0.3s ease;
+            border-right: 4px solid transparent; /* Placeholder for active border */
+        }
+        
+        /* Active (Next) Prayer Highlight - Soft & Elegant */
+        .prayer-card.active {
+            background-color: #ecfdf5; /* emerald-50 */
+            border-right-color: #10b981; /* emerald-500 */
+            transform: translateX(-4px); /* Slight shift in RTL */
+        }
+        
+        .prayer-card.active .prayer-name,
+        .prayer-card.active .prayer-time,
+        .prayer-card.active .prayer-icon {
+            color: #047857; /* emerald-700 */
+            font-weight: 700;
+        }
+
+        /* Pulse animation for the active icon */
+        .prayer-card.active .prayer-icon {
+            animation: pulse-soft 2s infinite;
+        }
+
+        @keyframes pulse-soft {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        
+        /* Loader */
+        .loader {
+            border-top-color: #10b981;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 sm:p-6 text-slate-800">
+
+    <div class="max-w-md w-full bg-white rounded-[2rem] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] overflow-hidden relative">
+        
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center transition-opacity duration-300">
+            <div class="loader ease-linear rounded-full border-4 border-slate-100 h-10 w-10 mb-4"></div>
+            <p class="text-slate-500 font-medium">جاري تحديث المواقيت...</p>
+        </div>
+
+        <!-- Header Section -->
+        <div class="p-8 pb-4">
+            <!-- Location & Refresh -->
+            <div class="flex justify-between items-center mb-6">
+                <div class="flex items-center text-slate-600 font-medium bg-slate-50 px-3 py-1.5 rounded-full">
+                    <i class="fa-solid fa-location-dot ml-2 text-emerald-500"></i>
+                    <span id="location-name" class="text-sm">أربيل، العراق</span>
+                </div>
+                <button onclick="requestGeolocation()" class="w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 transition-colors" title="تحديث الموقع">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+
+            <!-- Next Prayer & Countdown -->
+            <div class="text-center mt-2 mb-6">
+                <h2 id="hijri-date" class="text-sm font-medium text-slate-500 mb-1">--</h2>
+                <h3 id="current-date" class="text-xs text-slate-400 mb-6">--</h3>
+                
+                <p class="text-slate-500 mb-2 font-medium">الصلاة القادمة</p>
+                <div class="flex items-center justify-center gap-3 mb-2">
+                    <i id="next-prayer-icon" class="fa-solid fa-mosque text-2xl text-emerald-500"></i>
+                    <h1 id="next-prayer-name" class="text-3xl font-bold text-slate-800">--</h1>
+                </div>
+                <!-- Countdown -->
+                <div id="countdown" class="text-4xl font-extrabold text-emerald-600 tracking-tight" dir="ltr">
+                    --:--:--
+                </div>
+            </div>
+            
+            <hr class="border-slate-100 mb-2">
+        </div>
+
+        <!-- Prayer Times List -->
+        <div class="px-6 pb-8">
+            <div class="flex flex-col gap-2" id="prayer-list">
+                <!-- Prayer items will be injected here via JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Data & State with Icons
+        const PRAYERS = [
+            { id: 'Fajr', name: 'الفجر', icon: 'fa-cloud-moon' },
+            { id: 'Sunrise', name: 'الشروق', icon: 'fa-sun' },
+            { id: 'Dhuhr', name: 'الظهر', icon: 'fa-sun' },
+            { id: 'Asr', name: 'العصر', icon: 'fa-cloud-sun' },
+            { id: 'Maghrib', name: 'المغرب', icon: 'fa-moon' },
+            { id: 'Isha', name: 'العشاء', icon: 'fa-star-and-crescent' }
+        ];
+
+        let prayerTimings = {};
+        let nextPrayerInfo = null;
+        let isFetching = false;
+
+        // DOM Elements
+        const elCurrentDate = document.getElementById('current-date');
+        const elHijriDate = document.getElementById('hijri-date');
+        const elCountdown = document.getElementById('countdown');
+        const elNextPrayerName = document.getElementById('next-prayer-name');
+        const elNextPrayerIcon = document.getElementById('next-prayer-icon');
+        const elPrayerList = document.getElementById('prayer-list');
+        const elLocationName = document.getElementById('location-name');
+        const elLoading = document.getElementById('loading-overlay');
+
+        // Initialization
+        function init() {
+            renderPrayerPlaceholders();
+            fetchByCity('Erbil', 'Iraq');
+            
+            setInterval(tick, 1000);
+            tick(); 
+        }
+
+        // Timer Loop
+        function tick() {
+            const now = new Date();
+            
+            if (Object.keys(prayerTimings).length > 0) {
+                calculateNextPrayer(now);
+                updateCountdown(now);
+                
+                // Refresh data if it's midnight
+                if (now.getHours() === 0 && now.getMinutes() === 0 && now.getSeconds() === 0 && !isFetching) {
+                    if(elLocationName.innerText.includes('أربيل')) {
+                        fetchByCity('Erbil', 'Iraq');
+                    } else {
+                        requestGeolocation();
+                    }
+                }
+            }
+        }
+
+        // Convert 24-hour time to 12-hour time (ص/م)
+        function format12Hour(time24) {
+            let [hours, minutes] = time24.split(':').map(Number);
+            const period = hours >= 12 ? 'م' : 'ص';
+            hours = hours % 12;
+            hours = hours ? hours : 12; // the hour '0' should be '12'
+            
+            const paddedHours = hours.toString().padStart(2, '0');
+            const paddedMinutes = minutes.toString().padStart(2, '0');
+            
+            return `${paddedHours}:${paddedMinutes} ${period}`;
+        }
+
+        // Countdown update
+        function updateCountdown(now) {
+            if (!nextPrayerInfo) return;
+
+            const diff = nextPrayerInfo.date - now;
+            if (diff < 0) {
+                elCountdown.textContent = "00:00:00";
+                return;
+            }
+
+            const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
+            const m = Math.floor((diff / 1000 / 60) % 60);
+            const s = Math.floor((diff / 1000) % 60);
+
+            elCountdown.textContent = [
+                h.toString().padStart(2, '0'),
+                m.toString().padStart(2, '0'),
+                s.toString().padStart(2, '0')
+            ].join(':');
+        }
+
+        // Determine Next Prayer
+        function calculateNextPrayer(now) {
+            let next = null;
+            let nextDate = null;
+            
+            for (let i = 0; i < PRAYERS.length; i++) {
+                const prayer = PRAYERS[i];
+                const timeStr = prayerTimings[prayer.id];
+                if (!timeStr) continue;
+
+                const pDate = parseTime(timeStr, now);
+                
+                if (pDate > now) {
+                    next = prayer;
+                    nextDate = pDate;
+                    break;
+                }
+            }
+
+            if (!next) {
+                next = PRAYERS[0]; // Fajr next day
+                nextDate = parseTime(prayerTimings[next.id], now);
+                nextDate.setDate(nextDate.getDate() + 1); 
+            }
+
+            if (!nextPrayerInfo || nextPrayerInfo.id !== next.id) {
+                nextPrayerInfo = {
+                    id: next.id,
+                    name: next.name,
+                    icon: next.icon,
+                    date: nextDate
+                };
+                elNextPrayerName.textContent = next.name;
+                elNextPrayerIcon.className = `fa-solid ${next.icon} text-2xl text-emerald-500`;
+                highlightNextPrayer(next.id);
+            } else {
+                nextPrayerInfo.date = nextDate;
+            }
+        }
+
+        function parseTime(timeStr, refDate) {
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            const d = new Date(refDate.getTime());
+            d.setHours(hours, minutes, 0, 0);
+            return d;
+        }
+
+        // DOM Rendering
+        function renderPrayerPlaceholders() {
+            elPrayerList.innerHTML = '';
+            PRAYERS.forEach(p => {
+                const div = document.createElement('div');
+                div.className = `prayer-card flex justify-between items-center p-4 rounded-2xl bg-white border border-slate-100`;
+                div.id = `card-${p.id}`;
+                div.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center">
+                            <i class="fa-solid ${p.icon} text-slate-400 prayer-icon text-sm transition-colors"></i>
+                        </div>
+                        <span class="prayer-name font-semibold text-slate-600 text-lg transition-colors">${p.name}</span>
+                    </div>
+                    <span class="prayer-time font-bold text-slate-500 text-lg transition-colors" dir="ltr">--:-- --</span>
+                `;
+                elPrayerList.appendChild(div);
+            });
+        }
+
+        function updatePrayerListDOM() {
+            PRAYERS.forEach(p => {
+                const card = document.getElementById(`card-${p.id}`);
+                if (card && prayerTimings[p.id]) {
+                    // Convert 24h to 12h here
+                    const formatted12h = format12Hour(prayerTimings[p.id]);
+                    card.querySelector('.prayer-time').textContent = formatted12h;
+                }
+            });
+            
+            nextPrayerInfo = null; 
+            calculateNextPrayer(new Date());
+        }
+
+        function highlightNextPrayer(prayerId) {
+            document.querySelectorAll('.prayer-card').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            const activeCard = document.getElementById(`card-${prayerId}`);
+            if (activeCard) {
+                activeCard.classList.add('active');
+            }
+        }
+
+        function showLoading(show) {
+            isFetching = show;
+            if (show) {
+                elLoading.classList.remove('hidden');
+                elLoading.classList.add('flex');
+                setTimeout(() => elLoading.style.opacity = '1', 10);
+            } else {
+                elLoading.style.opacity = '0';
+                setTimeout(() => {
+                    elLoading.classList.remove('flex');
+                    elLoading.classList.add('hidden');
+                }, 300);
+            }
+        }
+
+        // API Fetching
+        async function fetchByCity(city, country) {
+            showLoading(true);
+            try {
+                const response = await fetch(`https://api.aladhan.com/v1/timingsByCity?city=${city}&country=${country}&method=8`);
+                const data = await response.json();
+                processApiResponse(data);
+            } catch (error) {
+                console.error("Error fetching prayer times:", error);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function fetchByCoords(lat, lng) {
+            showLoading(true);
+            try {
+                const response = await fetch(`https://api.aladhan.com/v1/timings?latitude=${lat}&longitude=${lng}&method=8`);
+                const data = await response.json();
+                elLocationName.innerText = "موقعي الحالي";
+                processApiResponse(data);
+            } catch (error) {
+                console.error("Error fetching prayer times by coords:", error);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function processApiResponse(payload) {
+            if (payload && payload.data && payload.data.timings) {
+                PRAYERS.forEach(p => {
+                    let rawTime = payload.data.timings[p.id];
+                    if(rawTime) {
+                        prayerTimings[p.id] = rawTime.split(' ')[0]; 
+                    }
+                });
+                
+                if (payload.data.date) {
+                    const h = payload.data.date.hijri;
+                    const g = payload.data.date.gregorian;
+                    
+                    elHijriDate.textContent = `${h.weekday.ar}، ${h.day} ${h.month.ar} ${h.year} هـ`;
+                    elCurrentDate.textContent = `${g.day} ${g.month.en} ${g.year} م`;
+                }
+
+                updatePrayerListDOM();
+            }
+        }
+
+        // Geolocation
+        function requestGeolocation() {
+            if (navigator.geolocation) {
+                showLoading(true);
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        fetchByCoords(position.coords.latitude, position.coords.longitude);
+                    },
+                    (error) => {
+                        showLoading(false);
+                        console.error("Geolocation error:", error);
+                    },
+                    { timeout: 10000 }
+                );
+            }
+        }
+
+        // Start
+        window.onload = init;
+    </script>
+</body>
+</html>
